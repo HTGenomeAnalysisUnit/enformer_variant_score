@@ -122,6 +122,9 @@ class FastaStringExtractor:
   def close(self):
       return self.fasta.close()
 
+def log(message, level="INFO"):
+  #Print a log message as [timestamp] - level - message
+  print(f'[{datetime.datetime.now()}] - {level} - {message}')
 
 def variant_generator(variant_input, gzipped=False):
   """Yields a kipoiseq.dataclasses.Variant for each variant"""
@@ -148,10 +151,8 @@ def variant_generator(variant_input, gzipped=False):
       yield kipoiseq.dataclasses.Variant(chrom=v[0], pos=v[1], ref=v[2], alt=v[3], 
                                          id=v[4] if len(v) == 5 else '_'.join(v))
 
-
 def one_hot_encode(sequence):
   return kipoiseq.transforms.functional.one_hot_dna(sequence).astype(np.float32)
-
 
 def variant_centered_sequences(variant_input, sequence_length, fasta_file, gzipped=False,
                                chr_prefix=''):
@@ -160,22 +161,28 @@ def variant_centered_sequences(variant_input, sequence_length, fasta_file, gzipp
     reference_sequence=FastaStringExtractor(fasta_file))
   
   for variant in variant_generator(variant_input, gzipped=gzipped):
-    interval = Interval(chr_prefix + variant.chrom,
-                        variant.pos, variant.pos)
-    interval = interval.resize(sequence_length)
-    center = interval.center() - interval.start
-    
-    reference = seq_extractor.extract(interval, [], anchor=center)
-    alternate = seq_extractor.extract(interval, [variant], anchor=center)
-    
-    result.append( {'interval': interval,
-      'inputs': {'ref': one_hot_encode(reference),
-                      'alt': one_hot_encode(alternate)},
-           'metadata': {'chrom': chr_prefix + variant.chrom,
-                        'pos': variant.pos,
-                        'id': variant.id,
-                        'ref': variant.ref,
-                        'alt': variant.alt}})
+    try:
+      interval = Interval(chr_prefix + variant.chrom,
+                          variant.pos, variant.pos)
+      interval = interval.resize(sequence_length)
+      center = interval.center() - interval.start
+      
+      reference = seq_extractor.extract(interval, [], anchor=center)
+      alternate = seq_extractor.extract(interval, [variant], anchor=center)
+      
+      result.append( {'interval': interval,
+        'inputs': {'ref': one_hot_encode(reference),
+                        'alt': one_hot_encode(alternate)},
+            'metadata': {'chrom': chr_prefix + variant.chrom,
+                          'pos': variant.pos,
+                          'id': variant.id,
+                          'ref': variant.ref,
+                          'alt': variant.alt}})
+    except Exception as e:
+      log(f'Error processing variant {variant.chrom}:{variant.pos}:{variant.ref}:{variant.alt}', 'WARNING')
+      print("The following exception was generated")
+      print(e)
+      continue
   return result
     
 def plot_tracks(tracks, interval, height=1.5):
@@ -187,10 +194,6 @@ def plot_tracks(tracks, interval, height=1.5):
   ax.set_xlabel(str(interval))
   plt.tight_layout()
   return(fig)
-
-def log(message, level="INFO"):
-  #Print a log message as [timestamp] - level - message
-  print(f'[{datetime.datetime.now()}] - {level} - {message}')
 
 def read_input(input, input_type):
   # If input is a file, read it line by line
@@ -282,10 +285,6 @@ def main():
     else:
       plot_features_idx = [int(x) for x in args.plot_features.split(',')]
       log(f'Plotting {len(plot_features_idx)} features: {plot_features_idx}')
-
-  # Init model and fasta extractor
-  #model = Enformer(model_path)
-  #fasta_extractor = FastaStringExtractor(fasta_file)
 
   log("== START PREDICTION ==")
   # Predict for variants
